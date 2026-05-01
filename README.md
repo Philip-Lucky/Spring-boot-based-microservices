@@ -1,12 +1,13 @@
 # Spring Boot Based Microservices
+A comprehensive, production-ready microservices reference architecture designed for managing courses and user reviews. This repository demonstrates modern cloud-native patterns with a heavy emphasis on:
 
-A modular, production-style microservices reference project for managing **courses** and **reviews** with strong focus on:
+- Centralized API routing via an edge gateway.
 
-- API gateway routing
-- OAuth2/OIDC security with Keycloak
-- Observability (metrics, logs, traces)
-- Docker Compose and Kubernetes/Tilt local deployment workflows
+- Robust Identity and Access Management (OAuth2/OIDC) powered by Keycloak.
 
+- Full-spectrum observability, including distributed tracing, centralized logging, and metrics.
+
+Seamless local development and deployment workflows leveraging Docker Compose and Kubernetes via Tilt.
 ---
 
 ## Table of Contents
@@ -26,15 +27,19 @@ A modular, production-style microservices reference project for managing **cours
 
 ## Overview
 
-The system is split into domain services and platform components:
+This system is logically partitioned into core business domains and foundational platform infrastructure to ensure scalable, maintainable code:
 
-- **Gateway Service**: entry point and request routing
-- **Course Service**: manages course data in PostgreSQL
-- **Review Service**: manages review data in MongoDB
-- **Course Composite Service**: aggregates course + review responses
-- **Keycloak**: identity provider for authn/authz
-- **Observability stack**: Prometheus, Grafana, Loki, Tempo, Fluent Bit, OpenTelemetry Collector
+**Gateway Service**: Acts as the system's front door, handling dynamic request routing and edge-level security.
 
+**Course Service:** A relational domain service responsible for the course catalog, backed by PostgreSQL.
+
+**Review Service:** A high-throughput NoSQL domain service managing user feedback, backed by MongoDB.
+
+**Course Composite Service:** An aggregator pattern implementation that stitches together discrete data from both the Course and Review services for streamlined client consumption.
+
+**Keycloak:** The dedicated identity provider handling authentication and authorization across the cluster.
+
+**Observability Stack:** A complete telemetry ecosystem featuring Prometheus, Grafana, Loki, Tempo, Fluent Bit, and the OpenTelemetry (OTEL) Collector.
 ---
 
 ## Architecture
@@ -60,7 +65,7 @@ The system is split into domain services and platform components:
 - **MongoDB** (Review Service)
 - **Keycloak** (OAuth2/OIDC)
 - **OpenTelemetry**, **Prometheus**, **Grafana**, **Loki**, **Tempo**, **Fluent Bit**
-- **Docker Compose** and **Kubernetes (Minikube + Tilt)**
+- **Docker Compose** and **Kubernetes (AWS EKS)**
 
 ---
 
@@ -71,7 +76,6 @@ Install the following before running:
 - Java 17+
 - Maven 3.8+
 - Docker + Docker Compose
-- (Optional) Minikube + Tilt for Kubernetes mode
 - curl or HTTPie for API validation
 
 ---
@@ -110,69 +114,92 @@ sh run.sh
 
 ---
 
-## Run with Kubernetes + Tilt
+##Run with Kubernetes + Tilt (Amazon EKS)
+This workflow assumes you have an active AWS account, the AWS CLI configured, and the eksctl tool installed.
 
-### 1) Start Minikube
+**1) Create an EKS Cluster**
+Use eksctl to spin up a new cluster. This process takes approximately 15-20 minutes.
 
-```bash
-minikube start \
-  --profile=microservice-deployment \
-  --memory=4g \
-  --cpus=4 \
-  --disk-size=30g \
-  --kubernetes-version=v1.31.0 \
-  --driver=docker
+```Bash
+eksctl create cluster \
+  --name microservice-cluster \
+  --region us-east-1 \
+  --nodegroup-name standard-workers \
+  --node-type t3.large \
+  --nodes 2 \
+  --nodes-min 1 \
+  --nodes-max 3 \
+  --managed
+```
+Note: Adjust the --region and --node-type based on your requirements and AWS limits.
+
+**2) Verify Cluster Access**
+Ensure your local kubectl context is configured correctly and pointing to your new EKS cluster.
+
+```Bash
+aws eks update-kubeconfig --region us-east-1 --name microservice-cluster
+kubectl get nodes
 ```
 
-### 2) Enable ingress
+**3) Set Up an Ingress Controller**
+EKS does not have a built-in ingress addon like Minikube. We recommend installing the NGINX Ingress Controller.
 
-```bash
-minikube addons enable ingress --profile microservice-deployment
+```Bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.2/deploy/static/provider/aws/deploy.yaml
 ```
+Wait for the AWS Classic Load Balancer to provision:
 
-### 3) Use Minikube Docker daemon
-
-```bash
-eval $(minikube -p microservice-deployment docker-env)
+```Bash
+kubectl get svc -n ingress-nginx ingress-nginx-controller
 ```
+(Copy the EXTERNAL-IP—this is the base URL for routing traffic to your cluster).
 
-### 4) Build images
+**4) Build and Push Images to a Container Registry**
+Because EKS runs in the cloud, it cannot access your local Docker daemon. You must push your images to a registry like Amazon ECR or Docker Hub.
 
-```bash
+First, update build-images.sh to tag images with your registry URI (e.g., <aws_account_id>[.dkr.ecr.us-east-1.amazonaws.com/service-name:latest](https://.dkr.ecr.us-east-1.amazonaws.com/service-name:latest)).
+
+# Log in to ECR 
+``` bash
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com
+```
+# Build and push images
+``` bash
 sh build-images.sh
 ```
+**5) Start Platform with Tilt**
+Note: You must update your Kubernetes manifests in the project to point to the remote registry URIs instead of local image names.
 
-### 5) Start platform with Tilt
-
-```bash
+```Bash
 tilt up
 ```
-
 Optional check:
 
-```bash
+```Bash
 tilt get uiresources
 ```
-
 Each service exposes actuator metrics and Prometheus output.
 
-## Core Endpoints
-
-> Ports and hostnames depend on your local setup (Docker vs Kubernetes ingress).
+**Core Endpoints**
+Note: When using EKS, your endpoints will be accessible via the External IP (or DNS name) of the NGINX Ingress Controller provisioned in Step 3.
 
 Typical routes exposed through the gateway:
 
-- `GET /course`
-- `POST /course`
-- `GET /review`
-- `POST /review`
-- `GET /course-composite/{courseId}`
+GET http://<INGRESS_EXTERNAL_IP>/course
+
+POST http://<INGRESS_EXTERNAL_IP>/course
+
+GET http://<INGRESS_EXTERNAL_IP>/review
+
+POST http://<INGRESS_EXTERNAL_IP>/review
+
+GET http://<INGRESS_EXTERNAL_IP>/course-composite/{courseId}
 
 Actuator/metrics examples:
 
-- `GET /actuator/health`
-- `GET /actuator/prometheus`
+GET http://<INGRESS_EXTERNAL_IP>/actuator/health
 
+`GET
 ---
 
 ## Keycloak
@@ -210,11 +237,8 @@ The token must contain both:
 - **Services fail to start**: verify dependent containers (PostgreSQL, MongoDB, Keycloak) are healthy.
 - **Auth issues (401/403)**: check token expiration, client config, and realm roles in Keycloak.
 - **No logs/traces/metrics**: ensure Fluent Bit, OTel collector, Prometheus, Loki, and Tempo are running.
-- **Kubernetes image pull issues**: confirm you built images in Minikube Docker context (`docker-env`).
+- **Kubernetes image pull issues**: confirm you built images in EKS Docker context (`docker-env`).
 
 ---
 
-## Notes
 
-- This README focuses on readable setup and operational flow.
-- Architecture diagrams remain in `notes/images`.
