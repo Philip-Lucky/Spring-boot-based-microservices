@@ -159,11 +159,11 @@ Because EKS runs in the cloud, it cannot access your local Docker daemon. You mu
 
 First, update build-images.sh to tag images with your registry URI (e.g., <aws_account_id>[.dkr.ecr.us-east-1.amazonaws.com/service-name:latest](https://.dkr.ecr.us-east-1.amazonaws.com/service-name:latest)).
 
-# Log in to ECR 
+**Log in to ECR** 
 ``` bash
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <aws_account_id>.dkr.ecr.us-east-1.amazonaws.com
 ```
-# Build and push images
+**Build and push images**
 ``` bash
 sh build-images.sh
 ```
@@ -199,7 +199,6 @@ Actuator/metrics examples:
 
 GET http://<INGRESS_EXTERNAL_IP>/actuator/health
 
-`GET
 ---
 
 ## Keycloak
@@ -237,7 +236,7 @@ The token must contain both:
 - **Services fail to start**: verify dependent containers (PostgreSQL, MongoDB, Keycloak) are healthy.
 - **Auth issues (401/403)**: check token expiration, client config, and realm roles in Keycloak.
 - **No logs/traces/metrics**: ensure Fluent Bit, OTel collector, Prometheus, Loki, and Tempo are running.
-- **Kubernetes image pull issues**: confirm you built images in EKS Docker context (`docker-env`).
+- **Kubernetes image pull issues**: confirm you built images in ECS Docker context (`docker-env`).
 
 ---
 
